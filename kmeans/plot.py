@@ -10,6 +10,7 @@ colors=['b','r','g','c','m','y','k','w','olive','orange']
 for i in range(k):
     data_temp=data[data.iloc[:,2]==i+1]
     plt.scatter(data_temp.iloc[:,0],data_temp.iloc[:,1],color=colors[i])
+
 plt.savefig("cluster_"+str(k)+"_"+str(n))
 plt.show()
 
