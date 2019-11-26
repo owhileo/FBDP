@@ -110,3 +110,149 @@ Reducer:
 ### 3.2 关注前10的产品：
 
 ![1574150230154](1574150230154.png)
+
+
+
+## 4. Hive 搭建
+
+总之经历了各种报错和各种尝试……最后搭成的方案为：
+
+先构建镜像(hadoop_6为之前准备好的hadoop+hbase镜像)：
+
+```Dock	
+FROM hadoop_6
+MAINTAINER While
+
+ADD apache-hive-3.1.2-bin.tar.gz /
+
+ENV HIVE_HOME /apache-hive-3.1.2-bin
+ENV PATH ${PATH}:$HIVE_HOME/bin
+
+CMD ["sh","-c","service ssh start;bash"]
+```
+
+因为hive只需要在master节点搭建就可以运行，因此直接以该新镜像启动集群，之后进入master节点进行进一步配置：
+
+1. 从hive-env.sh.templete 复制出hive-env.sh后配置HADOOP_HOME环境变量
+2. 从网上找到一个hive-site.xml直接写入该文件：
+
+```xml
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<configuration>  
+<property>  
+  <name>javax.jdo.option.ConnectionURL</name>  
+  <value>jdbc:derby:;databaseName=metastore_db;create=true</value>  
+</property>  
+   
+<property>  
+  <name>javax.jdo.option.ConnectionDriverName</name>  
+  <value>org.apache.derby.jdbc.EmbeddedDriver</value>  
+</property>  
+   
+<property>  
+  <name>hive.metastore.local</name>  
+  <value>true</value>  
+</property>  
+
+<property>  
+  <name>hive.metastore.schema.verification</name>  
+  <value>false</value>  
+</property>  
+   
+<property>  
+  <name>hive.metastore.warehouse.dir</name>  
+  <value>/user/hive/warehouse</value>  
+</property>  
+<property>
+    <name>datanucleus.schema.autoCreateAll</name>
+    <value>true</value>
+</property>
+</configuration>  
+```
+
+3. 修改hive自带guava版本，即将hadoop中的guava覆盖hive中的guava
+4. 最后我也不知道怎么地虽然有一堆warnings但就成功了，也不是很好复现…
+
+最后成功标志：
+
+可以成功进入hive并执行`show databases;`
+
+ ![img](ED4FV8U8OZVF_XFK0X9J90N.png) 
+
+## 5. Hive 操作
+
+### 5.1 建立表
+
+为了方便之后直接导入csv，查询后以如下方式建表：
+
+```mysql
+create table logs(
+    user_id int,item_id int,cat_id int,mer_id int,brand_id int,month int,day int,action int,age_range int,gender int,province string)
+    row format serde 'org.apache.hadoop.hive.serde2.OpenCSVSerde' 
+    WITH SERDEPROPERTIES( "separatorChar"="," )  STORED AS TEXTFILE; 
+```
+
+### 5.2 导入表
+
+考虑之前筛选过滤很容易过滤掉非常多的数据，这里就直接带入全数据试一遍：
+
+```mysql
+load data local inpath './million_user_log.csv' overwrite into table logs; 
+```
+
+执行结果如下：
+
+![1574781773342](1574781773342.png)
+
+测试导入成功：
+
+```mysql
+select count(*) from logs;
+```
+
+结果如下：整齐的1000,000条
+
+![1574781826079](1574781826079.png)
+
+### 5. 3  查询双11那天有多少人购买了商品 
+
+考虑到数据集即为双十一的数据集，故在日期上不需过多限定;
+
+而这里要求是计数”多少人“,因此需要以user_id为计数单位：
+
+```mysql
+select count(distinct user_id) from logs where action=2;
+```
+
+执行结果如下：共37202人
+
+![1574783004812](1574783004812.png)
+
+### 5.4  查询双11那天男女买家购买商品的比例 
+
+构建语句如下：
+
+```mysql
+select gender,count(distinct user_id) from logs where action=2 group by gender;
+```
+
+执行效果如下：
+
+![1574783109889](1574783109889.png)
+
+发现三种性别的人购买量上惊人地一致。
+
+男女买家比例为22413:22477
+
+### 5.5  查询双11那天浏览次数前十的品牌 
+
+构建查询语句如下：
+
+```mysql
+select  brand_id ,count(distinct user_id) num from logs where action=0 group by brand_id order by num desc limit 10 ;
+```
+
+执行结果如下：
+
+![1574783844723](1574783844723.png)
